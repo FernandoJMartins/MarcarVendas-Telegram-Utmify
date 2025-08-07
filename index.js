@@ -13,7 +13,7 @@ const app = express();
 
 const corsOptions = {
     origin: '*', // Permite qualquer origem. Use isso para testar.
-                 // Em produção, mude para: origin: 'https://seu-dominio-do-frontend.com.br',
+    // Em produção, mude para: origin: 'https://seu-dominio-do-frontend.com.br',
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
     optionsSuccessStatus: 204
@@ -22,12 +22,13 @@ app.use(cors(corsOptions));
 
 app.use(express.json());
 
-const apiId = 23313993; 
-const apiHash = 'd9249aed345807c04562fb52448a878c'; 
-const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '1AQAOMTQ5LjE1NC4xNzUuNjABu2GwozhcqLzaslIxvjgKuyk0SDJOEFBzd2qqrR428YPK3C/yA0s3sj/yqOkDNiiG3KXnmrXlVg/ro/XUM5PzR8bIQjLpVfMWxAbmqhJhsoIG7d0J58nIEnPqVDtc51L45kUMJhap/TdsVIuFaF2c2v5ZsHB/rAJGHY3mkbWR2l+3ovwnK4CCe4vfOt1uY7rK26drUUa4cWPANgREig7ODg6xbVo/7nnaiGwNLLyRF2qom47FSY6om+knu6ZTUE94romAPhp4cIwe2KP0Qdci4eWLHKdxf/lvY82epq5BHxFauPty7LoyLVemGbRHRGx2d2OAHrbxqFQcnZw/WephQ1g=');
-const CHAT_ID = BigInt(-1002733614113); 
+const apiId = 25280297;  // seu apiId
+const apiHash = 'f62f8889ed02919daf0212e9ea91c187';  // seu apiHash
+const stringSession = new StringSession(process.env.TELEGRAM_SESSION || '');
 
-const PORT = process.env.PORT || 3000; 
+const CHAT_ID = BigInt(-1002689082095);  // coloque seu chat id aqui (grupo ou canal)
+
+const PORT = process.env.PORT || 3000;
 
 // --- CONFIGURAÇÃO DO BANCO DE DADOS POSTGRESQL ---
 const pool = new Pool({
@@ -207,7 +208,7 @@ async function salvarFrontendUtms(data) {
         data.unique_click_id,
         data.timestamp,
         data.valor,
-        data.fbclid || null, 
+        data.fbclid || null,
         data.utm_source || null,
         data.utm_medium || null,
         data.utm_campaign || null,
@@ -381,10 +382,18 @@ app.listen(PORT, () => {
             process.exit(1);
         }
 
+
+
         // --- MANIPULAÇÃO DE MENSAGENS ---
         client.addEventHandler(async (event) => {
-            const message = event.message;
-            if (!message) return;
+            const message = event.message;  // assim tem acesso correto ao objeto Message
+            if (!message || !message.message) {
+                console.log('Mensagem inválida ou vazia, ignorando...');
+                return;
+            }
+
+            const msgText = message.message;
+            console.log('📩 Qualquer mensagem recebida:', msgText);
 
             const chat = await message.getChat();
             const incomingChatId = chat.id;
@@ -488,14 +497,14 @@ app.listen(PORT, () => {
 
                 // LÓGICA DE BUSCA ÚNICA: Prioriza APENAS o Código de Venda da mensagem
                 const extractedCodigoDeVenda = codigoDeVendaMatch ? codigoDeVendaMatch[1].trim() : null;
-                
+
                 if (extractedCodigoDeVenda) {
                     console.log(`🤖 [BOT] Tentando encontrar UTMs pelo Código de Venda extraído da mensagem: ${extractedCodigoDeVenda}`);
                     matchedFrontendUtms = await buscarUtmsPorUniqueClickId(extractedCodigoDeVenda);
                 } else {
                     console.log(`⚠️ [BOT] Código de Venda não encontrado na mensagem. Nenhuma UTM correspondente será buscada.`);
                 }
-                
+
                 // Os fallbacks anteriores por user_id e timestamp/IP foram REMOVIDOS,
                 // pois a busca agora é estritamente pelo Código de Venda.
 
@@ -588,6 +597,6 @@ app.listen(PORT, () => {
                 }
             }
 
-        }, new NewMessage({ chats: [CHAT_ID], incoming: true }));
+        }, new NewMessage({ chats: [CHAT_ID] }));
     })();
 });
