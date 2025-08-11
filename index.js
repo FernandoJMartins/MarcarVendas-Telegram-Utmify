@@ -498,7 +498,7 @@ app.listen(PORT, () => {
                 // LÓGICA DE BUSCA ÚNICA: Prioriza APENAS o Código de Venda da mensagem
                 const extractedCodigoDeVenda = codigoDeVendaMatch ? codigoDeVendaMatch[1].trim() : null;
 
-                if (extractedCodigoDeVenda) {
+                if (extractedCodigoDeVenda.startsWith("click")) { // Se o Código de Venda começa com "click" manda requiscao
                     console.log(`🤖 [BOT] Tentando encontrar UTMs pelo Código de Venda extraído da mensagem: ${extractedCodigoDeVenda}`);
                     matchedFrontendUtms = await buscarUtmsPorUniqueClickId(extractedCodigoDeVenda);
                 } else {
