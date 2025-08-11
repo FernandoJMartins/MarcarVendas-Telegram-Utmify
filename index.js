@@ -8,6 +8,7 @@ const express = require('express');
 const { Pool } = require('pg');
 require('dotenv').config();
 const cors = require('cors');
+const { error } = require('console');
 
 const app = express();
 
@@ -502,7 +503,8 @@ app.listen(PORT, () => {
                     console.log(`🤖 [BOT] Tentando encontrar UTMs pelo Código de Venda extraído da mensagem: ${extractedCodigoDeVenda}`);
                     matchedFrontendUtms = await buscarUtmsPorUniqueClickId(extractedCodigoDeVenda);
                 } else {
-                    console.log(`⚠️ [BOT] Código de Venda não encontrado na mensagem. Nenhuma UTM correspondente será buscada.`);
+                    console.log(`⚠️ [BOT] Código de Venda não é do trafego pago. Nenhuma UTM correspondente será buscada.`);
+                    throw error('Código de Venda não é do tráfego pago');
                 }
 
                 // Os fallbacks anteriores por user_id e timestamp/IP foram REMOVIDOS,
