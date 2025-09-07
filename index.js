@@ -560,30 +560,31 @@ app.listen(PORT, () => {
                 const extractedCodigoDeVenda = codigoDeVendaMatch ? codigoDeVendaMatch[1].trim() : null;
 
                 if (!extractedCodigoDeVenda) {
-                    console.log('⚠️ [BOT] Código de Venda não encontrado na mensagem');
                     return;
                 }
 
                 try {
-                    if (extractedCodigoDeVenda.startsWith("click")) {
-                        console.log(`🤖 [BOT] Tentando encontrar UTMs pelo Código de Venda: ${extractedCodigoDeVenda}`);
-                        matchedFrontendUtms = await buscarUtmsPorUniqueClickId(extractedCodigoDeVenda);
+                    matchedFrontendUtms = await buscarUtmsPorUniqueClickId(extractedCodigoDeVenda);
 
-                        if (!matchedFrontendUtms) {
-                            console.log(`⚠️ [BOT] UTMs não encontradas para Código de Venda: ${extractedCodigoDeVenda}`);
-                            return; // Retorna se não encontrar UTMs
-                        }
-                    } else {
-                        console.log(`⚠️ [BOT] Código de Venda não começa com "click": ${extractedCodigoDeVenda}`);
-                        return;
+                    if (!matchedFrontendUtms) {
+                        console.log(`⚠️ [BOT] UTMs não encontradas para Código de Venda: ${extractedCodigoDeVenda}`);
+                        utmsEncontradas = {
+                            utm_source: 'upsell-OR-notTracked',
+                            utm_medium: 'internal',
+                            utm_campaign: 'no_campaign',
+                            utm_content: 'no_content',
+                            utm_term: 'no_term'
+                        };
+                        ipClienteFrontend = 'internal_up';
+                        console.log('UTMS enviadas no lugar:')
+                        console.log(utmsEncontradas)
                     }
+
                 } catch (err) {
                     console.error('❌ [BOT] Erro ao buscar UTMs:', err);
                     return;
                 }
 
-                // Os fallbacks anteriores por user_id e timestamp/IP foram REMOVIDOS,
-                // pois a busca agora é estritamente pelo Código de Venda.
 
                 if (matchedFrontendUtms) {
                     utmsEncontradas = {
@@ -594,14 +595,10 @@ app.listen(PORT, () => {
                         utm_term: matchedFrontendUtms.utm_term || 'no_term'
                     };
                     ipClienteFrontend = matchedFrontendUtms.ip || 'frontend_matched';
-                    console.log(`--------------------------`);
-                    console.log(`--------------------------`);
-                    console.log(`✅ [BOT] UTMs para ${transaction_id} atribuídas!`);
+                    console.log(`✅ UTMs: ${transaction_id} atribuídas!`);
                     console.log(matchedFrontendUtms);
-                    console.log(`--------------------------`);
-                    console.log(`--------------------------`);
                 } else {
-                    console.log(`⚠️ [BOT] Nenhuma UTM correspondente encontrada para ${transaction_id} usando o Código de Venda. Enviando para UTMify sem UTMs de atribuição.`);
+                    console.log(`⚠️ Nenhuma UTM encontrada para ${transaction_id} usando o Código de Venda. Enviando para UTMify sem UTMs de atribuição.`);
                 }
 
                 const orderId = transaction_id;
@@ -649,10 +646,8 @@ app.listen(PORT, () => {
                 }
 
                 console.log(' -------------------------');
-                console.log(' -------------------------');
-                console.log('📬 [BOT] Payload enviado para UTMIFY:', payload);
-
-                console.log(' -------------------------');
+                console.log('📬 Payload enviado para UTMIFY:');
+                console.log(payload)
                 console.log(' -------------------------');
 
 
