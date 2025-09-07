@@ -299,7 +299,42 @@ async function limparFrontendUtmsAntigos() {
 }
 
 
+async function getUniqueClickId(id, res) {
+    try {
+        if (!id) {
+            return res.status(400).json({
+                error: 'Id é obrigatório'
+            });
+        }
 
+        const sql = ` SELECT * FROM frontend_utms WHERE unique_click_id = $1`;
+
+        const result = await pool.query(sql, [id])
+
+        if (result.rows.length == 0) {
+            return res.status(404).json({
+                error: 'Nenhum dado encontrado'
+            })
+        }
+
+        console.log(`✅ Dados encontrados para click_id: ${id}`);
+        res.status(200).json({
+            success: true,
+            data: result.rows[0]
+        });
+
+    } catch (error) {
+        console.error('❌ Erro ao buscar dados:', error);
+        res.status(500).json({
+            error: 'Erro interno ao buscar dados'
+        });
+    }
+}
+
+app.get('/id/:id', (req, res) => {
+    const unique_click_id = req.params.id;
+    getUniqueClickId(unique_click_id, res)
+})
 
 
 // --- ENDPOINT HTTP PARA RECEBER UTMs DO FRONTEND ---
