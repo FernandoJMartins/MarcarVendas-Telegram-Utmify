@@ -70,7 +70,7 @@ async function setupDatabase() {
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        console.log('✅ Tabela "vendas" verificada/criada no PostgreSQL.');
+        console.log('✅ Tabela "vendas"');
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS frontend_utms (
@@ -88,7 +88,7 @@ async function setupDatabase() {
                 received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        console.log('✅ Tabela "frontend_utms" verificada/criada/atualizada no PostgreSQL.');
+        console.log('✅ Tabela "frontend_utms"');
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS telegram_users (
@@ -182,47 +182,84 @@ async function saveUserClickAssociation(telegramUserId, uniqueClickId) {
     }
 }
 
-async function getUniqueClickIdForUser(telegramUserId) {
-    try {
-        const res = await pool.query(
-            `SELECT unique_click_id FROM telegram_users WHERE telegram_user_id = $1 LIMIT 1;`,
-            [telegramUserId]
-        );
-        return res.rows.length > 0 ? res.rows[0].unique_click_id : null;
-    } catch (err) {
-        console.error('❌ Erro ao buscar unique_click_id para o user_id:', err.message);
-        return null;
-    }
-}
-
 async function salvarFrontendUtms(data) {
+
+
+    // Validação dos dados recebidos
+    console.log('📥 Dados recebidos:', JSON.stringify(data, null, 2));
+
+    // Verifica dados obrigatórios
+    if (!data.unique_click_id || !data.timestamp) {
+        console.error('❌ Dados obrigatórios faltando:', {
+            unique_click_id: !!data.unique_click_id,
+            timestamp: !!data.timestamp
+        });
+        throw new Error('unique_click_id e timestamp são obrigatórios');
+    }
+
+
+    const processedData = {
+        ...data,
+        utm_source: data.utm_source || 'direct',
+        utm_medium: data.utm_medium || 'none',
+        utm_campaign: data.utm_campaign || 'no_campaign',
+        utm_content: data.utm_content || 'no_content',
+        utm_term: data.utm_term || 'no_term',
+        ip: data.ip || 'unknown'
+    };
+
+
+
     console.log('💾 Tentando salvar UTMs do frontend no banco (PostgreSQL)...');
     const sql = `
         INSERT INTO frontend_utms (
             unique_click_id, timestamp_ms, valor, fbclid, utm_source, utm_medium,
             utm_campaign, utm_content, utm_term, ip
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        
+                ON CONFLICT (unique_click_id)
+        DO UPDATE SET
+            timestamp_ms = EXCLUDED.timestamp_ms,
+            valor = EXCLUDED.valor,
+            fbclid = EXCLUDED.fbclid,
+            utm_source = EXCLUDED.utm_source,
+            utm_medium = EXCLUDED.utm_medium,
+            utm_campaign = EXCLUDED.utm_campaign,
+            utm_content = EXCLUDED.utm_content,
+            utm_term = EXCLUDED.utm_term,
+            ip = EXCLUDED.ip;;
     `;
 
+
     const valores = [
-        data.unique_click_id,
-        data.timestamp,
-        data.valor,
-        data.fbclid || null,
-        data.utm_source || null,
-        data.utm_medium || null,
-        data.utm_campaign || null,
-        data.utm_content || null,
-        data.utm_term || null,
-        data.ip || null
+        processedData.unique_click_id,
+        processedData.timestamp,
+        processedData.valor || 0,
+        processedData.fbclid || null,
+        processedData.utm_source,
+        processedData.utm_medium,
+        processedData.utm_campaign,
+        processedData.utm_content,
+        processedData.utm_term,
+        processedData.ip
     ];
 
     try {
-        await pool.query(sql, valores);
-        console.log('✅ UTMs do frontend salvas no PostgreSQL!');
+        const result = await pool.query(sql, valores);
+        console.log('✅ UTMs do frontend salvas no PostgreSQL!', {
+            operação: result.rowCount === 1 ? 'INSERT' : 'UPDATE',
+            clickId: processedData.unique_click_id,
+            utms: {
+                source: processedData.utm_source,
+                medium: processedData.utm_medium,
+                campaign: processedData.utm_campaign
+            }
+        });
+        return true;
     } catch (err) {
-        console.error('❌ Erro ao salvar UTMs do frontend no DB (PostgreSQL):', err.message);
+        console.error('❌ Erro ao salvar UTMs do frontend:', err.message);
+        throw err;
     }
 }
 
@@ -244,67 +281,57 @@ async function buscarUtmsPorUniqueClickId(uniqueClickId) {
     }
 }
 
-async function buscarUtmsPorTempoEValor(targetTimestamp, targetIp = null, windowMs = 120000) {
-    console.log(`🔎 Buscando UTMs do frontend por timestamp ${targetTimestamp} (janela de ${windowMs / 1000}s)...`);
-    const minTimestamp = targetTimestamp - windowMs;
-    const maxTimestamp = targetTimestamp + windowMs;
 
-    let sql = `
-        SELECT * FROM frontend_utms
-        WHERE timestamp_ms BETWEEN $1 AND $2
-    `;
-    let params = [minTimestamp, maxTimestamp];
-    let paramIndex = 3;
 
-    if (targetIp && targetIp !== 'telegram' && targetIp !== 'userbot') {
-        sql += ` AND ip = $${paramIndex++}`;
-        params.push(targetIp);
-    }
-
-    sql += ` ORDER BY ABS(timestamp_ms - $${paramIndex++}) ASC LIMIT 1`;
-    params.push(targetTimestamp);
-
-    try {
-        const res = await pool.query(sql, params);
-        if (res.rows.length > 0) {
-            console.log(`✅ UTMs do frontend encontradas para timestamp ${targetTimestamp}.`);
-            return res.rows[0];
-        } else {
-            console.log(`🔎 Nenhuma UTM do frontend encontrada para timestamp ${targetTimestamp} na janela.`);
-            return null;
-        }
-    } catch (err) {
-        console.error('❌ Erro ao buscar UTMs por tempo (PostgreSQL):', err.message);
-        return null;
-    }
-}
 
 // --- FUNÇÃO PARA LIMPAR DADOS ANTIGOS DA TABELA frontend_utms ---
 async function limparFrontendUtmsAntigos() {
-    console.log('🧹 Iniciando limpeza de UTMs antigos do frontend...');
+    console.log('🧹 limpeza UTMs...');
     const cutoffTime = moment().subtract(24, 'hours').valueOf();
     const sql = `DELETE FROM frontend_utms WHERE timestamp_ms < $1`;
 
     try {
         const res = await pool.query(sql, [cutoffTime]);
-        console.log(`🧹 Limpeza de UTMs antigos do frontend: ${res.rowCount || 0} registros removidos.`);
+        console.log(`🧹 limpeza UTMs: ${res.rowCount || 0} registros removidos.`);
     } catch (err) {
         console.error('❌ Erro ao limpar UTMs antigos do frontend:', err.message);
     }
 }
 
 
+
+
+
 // --- ENDPOINT HTTP PARA RECEBER UTMs DO FRONTEND ---
 app.post('/frontend-utm-data', (req, res) => {
     const { unique_click_id, timestamp, valor, fbclid, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip } = req.body;
 
-    console.log('🚀 [BACKEND] Dados do frontend recebidos:', {
+
+
+
+
+    console.log('🤖 [BACKEND] Dados do frontend recebidos:', {
         unique_click_id, timestamp, valor, fbclid, utm_source, utm_medium, utm_campaign, utm_content, utm_term, ip
     });
+
+
+    if (!unique_click_id || !timestamp) {
+        console.error('❌ [BACKEND] Requisição inválida - dados obrigatórios ausentes');
+        return res.status(400).send('unique_click_id e timestamp são obrigatórios.');
+    }
+
+    if (!unique_click_id.startsWith('click-')) {
+        console.error('❌ [BACKEND] unique_click_id inválido:', unique_click_id);
+        return res.status(400).send('Formato de unique_click_id inválido');
+    }
 
     if (!unique_click_id || !timestamp || valor === undefined || valor === null) {
         return res.status(400).send('unique_click_id, Timestamp e Valor são obrigatórios.');
     }
+
+
+
+
 
     salvarFrontendUtms({
         unique_click_id,
@@ -324,7 +351,7 @@ app.post('/frontend-utm-data', (req, res) => {
 
 // --- Endpoint para ping (manter o serviço ativo) ---
 app.get('/ping', (req, res) => {
-    console.log('💚 [PING] Recebida requisição /ping. Serviço está ativo.');
+    console.log('💚 [PING]');
     res.status(200).send('Pong!');
 });
 
@@ -362,7 +389,6 @@ app.listen(PORT, () => {
         limparFrontendUtmsAntigos();
 
         setInterval(limparFrontendUtmsAntigos, 60 * 60 * 1000);
-        console.log('🧹 Limpeza de UTMs antigos agendada para cada 1 hora.');
 
         console.log('Iniciando userbot...');
         const client = new TelegramClient(stringSession, apiId, apiHash, {
@@ -394,7 +420,6 @@ app.listen(PORT, () => {
             }
 
             const msgText = message.message;
-            console.log('📩 Qualquer mensagem recebida:', msgText);
 
             const chat = await message.getChat();
             const incomingChatId = chat.id;
@@ -499,25 +524,47 @@ app.listen(PORT, () => {
                 // LÓGICA DE BUSCA ÚNICA: Prioriza APENAS o Código de Venda da mensagem
                 const extractedCodigoDeVenda = codigoDeVendaMatch ? codigoDeVendaMatch[1].trim() : null;
 
-                if (extractedCodigoDeVenda.startsWith("click")) { // Se o Código de Venda começa com "click" manda requiscao
-                    console.log(`🤖 [BOT] Tentando encontrar UTMs pelo Código de Venda extraído da mensagem: ${extractedCodigoDeVenda}`);
-                    matchedFrontendUtms = await buscarUtmsPorUniqueClickId(extractedCodigoDeVenda);
-                } else {
-                    console.log(`⚠️ [BOT] Código de Venda não é do trafego pago. Nenhuma UTM correspondente será buscada.`);
-                    throw error('Código de Venda não é do tráfego pago');
+                if (!extractedCodigoDeVenda) {
+                    console.log('⚠️ [BOT] Código de Venda não encontrado na mensagem');
+                    return;
+                }
+
+                try {
+                    if (extractedCodigoDeVenda.startsWith("click")) {
+                        console.log(`🤖 [BOT] Tentando encontrar UTMs pelo Código de Venda: ${extractedCodigoDeVenda}`);
+                        matchedFrontendUtms = await buscarUtmsPorUniqueClickId(extractedCodigoDeVenda);
+
+                        if (!matchedFrontendUtms) {
+                            console.log(`⚠️ [BOT] UTMs não encontradas para Código de Venda: ${extractedCodigoDeVenda}`);
+                            return; // Retorna se não encontrar UTMs
+                        }
+                    } else {
+                        console.log(`⚠️ [BOT] Código de Venda não começa com "click": ${extractedCodigoDeVenda}`);
+                        return;
+                    }
+                } catch (err) {
+                    console.error('❌ [BOT] Erro ao buscar UTMs:', err);
+                    return;
                 }
 
                 // Os fallbacks anteriores por user_id e timestamp/IP foram REMOVIDOS,
                 // pois a busca agora é estritamente pelo Código de Venda.
 
                 if (matchedFrontendUtms) {
-                    utmsEncontradas.utm_source = matchedFrontendUtms.utm_source;
-                    utmsEncontradas.utm_medium = matchedFrontendUtms.utm_medium;
-                    utmsEncontradas.utm_campaign = matchedFrontendUtms.utm_campaign;
-                    utmsEncontradas.utm_content = matchedFrontendUtms.utm_content;
-                    utmsEncontradas.utm_term = matchedFrontendUtms.utm_term;
+                    utmsEncontradas = {
+                        utm_source: matchedFrontendUtms.utm_source || 'no_source',
+                        utm_medium: matchedFrontendUtms.utm_medium || 'no_medium',
+                        utm_campaign: matchedFrontendUtms.utm_campaign || 'no_campaign',
+                        utm_content: matchedFrontendUtms.utm_content || 'no_content',
+                        utm_term: matchedFrontendUtms.utm_term || 'no_term'
+                    };
                     ipClienteFrontend = matchedFrontendUtms.ip || 'frontend_matched';
+                    console.log(`--------------------------`);
+                    console.log(`--------------------------`);
                     console.log(`✅ [BOT] UTMs para ${transaction_id} atribuídas!`);
+                    console.log(matchedFrontendUtms);
+                    console.log(`--------------------------`);
+                    console.log(`--------------------------`);
                 } else {
                     console.log(`⚠️ [BOT] Nenhuma UTM correspondente encontrada para ${transaction_id} usando o Código de Venda. Enviando para UTMify sem UTMs de atribuição.`);
                 }
@@ -566,6 +613,14 @@ app.listen(PORT, () => {
                     }
                 }
 
+                console.log(' -------------------------');
+                console.log(' -------------------------');
+                console.log('📬 [BOT] Payload enviado para UTMIFY:', payload);
+
+                console.log(' -------------------------');
+                console.log(' -------------------------');
+
+
                 const res = await axios.post('https://api.utmify.com.br/api-credentials/orders', payload, {
                     headers: {
                         'x-api-token': process.env.API_KEY,
@@ -573,8 +628,7 @@ app.listen(PORT, () => {
                     }
                 });
 
-                console.log('📬 [BOT] Resposta da UTMify:', res.status, res.data);
-                console.log('📦 [BOT] Pedido criado na UTMify:', res.data);
+
 
                 salvarVenda({
                     chave,
