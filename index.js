@@ -605,7 +605,7 @@ app.listen(PORT, () => {
                         console.log(`⚠️ [BOT] UTMs não encontradas para Código de Venda: ${extractedCodigoDeVenda}`);
                         console.log(`Provavelmente UPSELL: ${extractedCodigoDeVenda}`);
 
-                        if (getClientHasOrder(customerId)) {
+                        if (await getClientHasOrder(customerId)) {
                             const oldClickId = await getClientClickId(customerId)
                             matchedFrontendUtms = await buscarUtmsPorUniqueClickId(oldClickId);
                         }
