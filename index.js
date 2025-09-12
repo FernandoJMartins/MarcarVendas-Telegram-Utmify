@@ -168,6 +168,37 @@ async function vendaExiste(hash) {
     }
 }
 
+async function getClientHasOrder(clientId) {
+    console.log(`🔎 Verificando cliente: ${clientId} já possui venda no PostgreSQL...`);
+    const sql = 'SELECT COUNT(*) AS total FROM telegram_users WHERE telegram_user_id = $1';
+    try {
+        const res = await pool.query(sql, [clientId]);
+        return res.rows[0].total > 0;
+    } catch (err) {
+        console.error('❌ Erro ao verificar venda existente (PostgreSQL):', err.message);
+        return false;
+    }
+}
+
+async function getClientClickId(clientId) {
+    console.log(`🔎 CAPTURANDO CLICKID DO CLIENTE: ${clientId} no PostgreSQL...`);
+    const sql = 'SELECT unique_click_id AS id FROM telegram_users WHERE telegram_user_id = $1';
+    try {
+        const res = await pool.query(sql, [clientId]);
+
+        if (res.rows.length > 0) {
+            return res.rows[0].id;
+        } else {
+            console.log(`Cliente ${clientId} não encontrado.`);
+            return null;
+        }
+
+    } catch (err) {
+        console.error('❌ Erro ao verificar venda existente (PostgreSQL):', err.message);
+        return false;
+    }
+}
+
 async function saveUserClickAssociation(telegramUserId, uniqueClickId) {
     try {
         await pool.query(
@@ -505,6 +536,8 @@ app.listen(PORT, () => {
             const metodoPagamentoRegex = /M[ée]todo\s+Pagamento[:：]?\s*(.+)/i;
             const plataformaPagamentoRegex = /Plataforma\s+Pagamento[:：]?\s*(.+)/i;
 
+            const customerIdRegex = /ID\s+Cliente[:：]?\s*(\d+)/i;
+
 
             const idMatch = texto.match(idRegex);
             const valorLiquidoMatch = texto.match(valorLiquidoRegex);
@@ -516,7 +549,9 @@ app.listen(PORT, () => {
             const emailMatch = texto.match(emailRegex);
             const metodoPagamentoMatch = texto.match(metodoPagamentoRegex);
             const plataformaPagamentoMatch = texto.match(plataformaPagamentoRegex);
+            const customerIdMatch = texto.match(customerIdRegex);
 
+            const customerId = customerIdMatch ? customerIdMatch[1].trim() : "ID Desconhecido";
             const customerName = nomeMatch ? nomeMatch[1].trim() : "Cliente Desconhecido";
             const customerEmail = emailMatch ? emailMatch[1].trim() : "desconhecido@email.com";
             const paymentMethod = metodoPagamentoMatch ? metodoPagamentoMatch[1].trim().toLowerCase().replace(' ', '_') : 'unknown';
@@ -568,16 +603,32 @@ app.listen(PORT, () => {
 
                     if (!matchedFrontendUtms) {
                         console.log(`⚠️ [BOT] UTMs não encontradas para Código de Venda: ${extractedCodigoDeVenda}`);
-                        utmsEncontradas = {
-                            utm_source: 'upsell-OR-notTracked',
-                            utm_medium: 'internal',
-                            utm_campaign: 'no_campaign',
-                            utm_content: 'no_content',
-                            utm_term: 'no_term'
-                        };
-                        ipClienteFrontend = 'internal_up';
-                        console.log('UTMS enviadas no lugar:')
-                        console.log(utmsEncontradas)
+                        console.log(`Provavelmente UPSELL: ${extractedCodigoDeVenda}`);
+
+                        if (getClientHasOrder(customerId)) {
+                            const oldClickId = await getClientClickId(customerId)
+                            matchedFrontendUtms = await buscarUtmsPorUniqueClickId(oldClickId);
+                        }
+                        else {
+
+
+                            //CAPTURAR ID DO CLIENTE PEGAR CLICK ID E REINICIAR MACTCHEDFRONTENDUTMS
+
+
+
+                            utmsEncontradas = {
+                                utm_source: 'upsell-OR-notTracked',
+                                utm_medium: 'internal',
+                                utm_campaign: 'no_campaign',
+                                utm_content: 'no_content',
+                                utm_term: 'no_term'
+                            };
+                            ipClienteFrontend = 'internal_up';
+
+
+                            console.log('UTMS enviadas no lugar:')
+                            console.log(utmsEncontradas)
+                        }
                     }
 
                 } catch (err) {
@@ -674,6 +725,8 @@ app.listen(PORT, () => {
                     ip: ipClienteFrontend,
                     userAgent: 'userbot'
                 });
+
+                saveUserClickAssociation(customerId, extractedCodigoDeVenda)
 
             } catch (err) {
                 console.error('❌ [BOT] Erro ao processar mensagem ou enviar para UTMify:', err.message);
